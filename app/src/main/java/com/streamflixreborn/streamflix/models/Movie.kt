@@ -29,6 +29,7 @@ class Movie(
     @Ignore
     var providerName: String? = null,
 
+
     @Ignore
     val genres: List<Genre> = listOf(),
     @Ignore
@@ -38,10 +39,13 @@ class Movie(
     @Ignore
     val recommendations: List<Show> = listOf(),
     override var isFavorite: Boolean = false,
+    @Ignore
+    var contentRating: ContentRating? = null,
 ) : Show, WatchItem, AppAdapter.Item {
 
     var released = released?.toCalendar()
     var favoritedAtMillis: Long? = null
+    var lastPlayedAtMillis: Long? = null
 
     override var isWatched: Boolean = false
     override var watchedDate: Calendar? = null
@@ -56,6 +60,7 @@ class Movie(
         if (isWatched != movie.isWatched) return false
         if (watchedDate != movie.watchedDate) return false
         if (watchHistory != movie.watchHistory) return false
+        if (lastPlayedAtMillis != movie.lastPlayedAtMillis) return false
         return true
     }
 
@@ -65,6 +70,7 @@ class Movie(
         this.isWatched = movie.isWatched
         this.watchedDate = movie.watchedDate
         this.watchHistory = movie.watchHistory
+        this.lastPlayedAtMillis = movie.lastPlayedAtMillis
         return this
     }
 
@@ -85,6 +91,7 @@ class Movie(
         poster: String? = this.poster,
         banner: String? = this.banner,
         imdbId: String? = this.imdbId,
+        contentRating: ContentRating? = this.contentRating,
         genres: List<Genre> = this.genres,
         directors: List<People> = this.directors,
         cast: List<People> = this.cast,
@@ -108,7 +115,10 @@ class Movie(
         cast,
         recommendations,
         isFavorite,
-    )
+        contentRating,
+    ).apply {
+        lastPlayedAtMillis = this@Movie.lastPlayedAtMillis
+    }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -126,6 +136,7 @@ class Movie(
         if (poster != other.poster) return false
         if (banner != other.banner) return false
         if (imdbId != other.imdbId) return false
+        if (contentRating != other.contentRating) return false
         if (genres != other.genres) return false
         if (directors != other.directors) return false
         if (cast != other.cast) return false
@@ -137,6 +148,7 @@ class Movie(
         if (isWatched != other.isWatched) return false
         if (watchedDate != other.watchedDate) return false
         if (watchHistory != other.watchHistory) return false
+        if (lastPlayedAtMillis != other.lastPlayedAtMillis) return false
         if (!::itemType.isInitialized || !other::itemType.isInitialized) return false
         return itemType == other.itemType
     }
@@ -152,6 +164,7 @@ class Movie(
         result = 31 * result + (poster?.hashCode() ?: 0)
         result = 31 * result + (banner?.hashCode() ?: 0)
         result = 31 * result + (imdbId?.hashCode() ?: 0)
+        result = 31 * result + (contentRating?.hashCode() ?: 0)
         result = 31 * result + genres.hashCode()
         result = 31 * result + directors.hashCode()
         result = 31 * result + cast.hashCode()
@@ -162,6 +175,7 @@ class Movie(
         result = 31 * result + isWatched.hashCode()
         result = 31 * result + (watchedDate?.hashCode() ?: 0)
         result = 31 * result + (watchHistory?.hashCode() ?: 0)
+        result = 31 * result + (lastPlayedAtMillis?.hashCode() ?: 0)
         result = 31 * result + (if (::itemType.isInitialized) itemType.hashCode() else 0)
         return result
     }

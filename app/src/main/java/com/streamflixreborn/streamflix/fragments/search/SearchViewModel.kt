@@ -11,6 +11,9 @@ import com.streamflixreborn.streamflix.providers.IptvProvider
 import com.streamflixreborn.streamflix.providers.Provider
 import com.streamflixreborn.streamflix.utils.ParentalControlUtils
 import com.streamflixreborn.streamflix.utils.UserPreferences
+import com.streamflixreborn.streamflix.StreamFlixApp
+import com.streamflixreborn.streamflix.interfaceprofile.InterfaceProfileManager
+import com.streamflixreborn.streamflix.interfaceprofile.MultiProviderRepository
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.flow.Flow
@@ -20,6 +23,8 @@ import kotlinx.coroutines.flow.emitAll
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.transformLatest
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 
 // DEFINICIONES DE ESTADO Y RESULTADOS (Fuera de la clase para mejor acceso)
 sealed class State {
@@ -44,6 +49,7 @@ data class ProviderResult(
 
 
 class SearchViewModel(database: AppDatabase) : ViewModel() {
+    private val multiProvider = MultiProviderRepository(StreamFlixApp.instance.applicationContext)
 
     private val _state = MutableStateFlow<State>(State.Searching)
     @OptIn(ExperimentalCoroutinesApi::class)
@@ -52,6 +58,10 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
         _state.transformLatest { state ->
             when (state) {
                 is State.SuccessSearching -> {
+                    if (combineSearchEnabled()) {
+                        emit(emptyList())
+                        return@transformLatest
+                    }
                     val movies = state.results
                         .filterIsInstance<Movie>()
                     if (movies.isEmpty()) {
@@ -66,6 +76,10 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
         _state.transformLatest { state ->
             when (state) {
                 is State.SuccessSearching -> {
+                    if (combineSearchEnabled()) {
+                        emit(emptyList())
+                        return@transformLatest
+                    }
                     val tvShows = state.results
                         .filterIsInstance<TvShow>()
                     if (tvShows.isEmpty()) {
@@ -115,7 +129,11 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
         _state.emit(State.Searching)
 
         try {
-            val results = ParentalControlUtils.filterItems(UserPreferences.currentProvider!!.search(query))
+            val results = if (combineSearchEnabled()) {
+                multiProvider.search(query).value
+            } else {
+                ParentalControlUtils.filterItems(UserPreferences.currentProvider!!.search(query))
+            }
             this@SearchViewModel.query = query
             page = 1
             _state.emit(State.SuccessSearching(results, results.isNotEmpty()))
@@ -130,9 +148,11 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
         if (currentState is State.SuccessSearching) {
             _state.emit(State.SearchingMore)
             try {
-                val results = ParentalControlUtils.filterItems(
-                    UserPreferences.currentProvider!!.search(query, page + 1)
-                )
+                val results = if (combineSearchEnabled()) {
+                    multiProvider.search(query, page + 1).value
+                } else {
+                    ParentalControlUtils.filterItems(UserPreferences.currentProvider!!.search(query, page + 1))
+                }
                 val existingKeys = currentState.results
                     .asSequence()
                     .map { it.searchIdentityKey() }
@@ -155,11 +175,7 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
     // FUNCIÓN DE BÚSQUEDA GLOBAL AÑADIDA
     fun searchGlobal(query: String, currentLanguage: String) = viewModelScope.launch(Dispatchers.IO) {
         _state.emit(State.GlobalSearching)
-
-        val isCurrentProviderIptv = UserPreferences.currentProvider is IptvProvider
-        val targetProviders = Provider.providers.keys
-            .filter { it.language == currentLanguage && (it is IptvProvider) == isCurrentProviderIptv }
-            .toList()
+        val targetProviders = multiProvider.enabledProviders()
 
         if (targetProviders.isEmpty()) {
             _state.emit(State.SuccessGlobalSearching(emptyList()))
@@ -172,6 +188,7 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
         _state.emit(State.SuccessGlobalSearching(initialResults))
 
         val mutableResults = initialResults.toMutableList()
+        val resultsMutex = Mutex()
 
         val stateComparator = compareBy<ProviderResult> { providerResult ->
             when (val state = providerResult.state) {
@@ -181,32 +198,26 @@ class SearchViewModel(database: AppDatabase) : ViewModel() {
             }
         }
 
-        targetProviders.forEachIndexed { index, provider ->
-            launch {
-                try {
-                    val results = ParentalControlUtils.filterItems(provider.search(query).onEach { item ->
-                        // ========= ¡AQUÍ ESTÁ LA MAGIA! =========
-                        // Le ponemos el sello a cada resultado
-                        when (item) {
-                            is Movie -> item.providerName = provider.name
-                            is TvShow -> item.providerName = provider.name
-                        }
-                        // =======================================
-                    })
-                    mutableResults[index] = ProviderResult(provider, ProviderResult.State.Success(results))
-                } catch (e: Exception) {
-                    Log.e("SearchViewModel", "searchGlobal for ${provider.name}: ", e)
-                    mutableResults[index] = ProviderResult(provider, ProviderResult.State.Error(e))
-                }
-
+        targetProviders.forEachIndexed { index, provider -> launch {
+            val providerResult = runCatching { ParentalControlUtils.filterItems(provider.search(query).onEach { item ->
+                when (item) { is Movie -> item.providerName = provider.name; is TvShow -> item.providerName = provider.name }
+            }) }.fold(
+                { ProviderResult(provider, ProviderResult.State.Success(it)) },
+                { Log.e("SearchViewModel", "searchGlobal for ${provider.name}", it); ProviderResult(provider, ProviderResult.State.Error(Exception(it))) }
+            )
+            resultsMutex.withLock {
+                mutableResults[index] = providerResult
                 _state.emit(State.SuccessGlobalSearching(mutableResults.sortedWith(stateComparator)))
             }
-        }
+        } }
     }
+
+    /** One predicate controls fetching, pagination, and provider-local DB enrichment. */
+    private fun combineSearchEnabled(): Boolean = InterfaceProfileManager.requireActive().combineSearch
 }
 
 private fun AppAdapter.Item.searchIdentityKey(): String = when (this) {
-    is Movie -> "movie:$id"
-    is TvShow -> "tvshow:$id"
+    is Movie -> "${providerName.orEmpty()}:movie:$id"
+    is TvShow -> "${providerName.orEmpty()}:tvshow:$id"
     else -> "${this::class.java.name}:${hashCode()}"
 }

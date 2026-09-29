@@ -14,6 +14,7 @@ import com.streamflixreborn.streamflix.models.Season
 import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.models.WatchItem
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.interfaceprofile.InterfaceProfileManager
 import com.streamflixreborn.streamflix.utils.UserDataCache
 import kotlinx.coroutines.flow.first
 import org.json.JSONArray
@@ -82,16 +83,16 @@ class BackupRestoreManager(
     fun exportUserData(): String? {
         return try {
             val root = JSONObject()
-            root.put("version", 4) // Versione aumentata per includere le stagioni
+            root.put("version", 6)
             root.put("exportedAt", System.currentTimeMillis())
 
             val providersArray = JSONArray()
             for (p in providers) {
                 // Controlla se il database per questo provider ha dati rilevanti
                 val moviesToExport = p.movieDao.getAll()
-                    .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null || it.isFavorite }
+                    .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null || it.isFavorite || it.lastPlayedAtMillis != null }
                 val tvShowsToExport = p.tvShowDao.getAllForBackup()
-                    .filter { it.isWatching || it.isFavorite }
+                    .filter { it.isWatching || it.isFavorite || it.lastPlayedAtMillis != null }
                 val episodesToExport = p.episodeDao.getAllForBackup()
                     .filter { it.isWatched || it.watchedDate != null || it.watchHistory != null }
                 
@@ -116,6 +117,7 @@ class BackupRestoreManager(
                         put("isWatched", movie.isWatched)
                         put("watchedDate", movie.watchedDate?.timeInMillis ?: JSONObject.NULL)
                         put("watchHistory", movie.watchHistory?.toJson() ?: JSONObject.NULL)
+                        put("lastPlayedAtMillis", movie.lastPlayedAtMillis ?: JSONObject.NULL)
                     }
                     moviesArray.put(obj)
                     Log.d(TAG, "EXPORT: [${p.name}] Movie: ${movie.title} (Fav: ${movie.isFavorite})")
@@ -133,6 +135,8 @@ class BackupRestoreManager(
                         put("isFavorite", show.isFavorite)
                         put("favoritedAtMillis", show.favoritedAtMillis ?: JSONObject.NULL)
                         put("isWatching", show.isWatching)
+                        put("lastPlayedAtMillis", show.lastPlayedAtMillis ?: JSONObject.NULL)
+                        put("lastPlayedEpisodeId", show.lastPlayedEpisodeId ?: JSONObject.NULL)
                     }
                     tvShowsArray.put(obj)
                     Log.d(TAG, "EXPORT: [${p.name}] TV Show: ${show.title} (Fav: ${show.isFavorite})")
@@ -177,7 +181,8 @@ class BackupRestoreManager(
             }
 
             root.put("providers", providersArray)
-            Log.d(TAG, "Export successful for version 4. Total providers exported: ${providersArray.length()}")
+            root.put("interfaceProfiles", JSONArray(InterfaceProfileManager.exportJson()))
+            Log.d(TAG, "Export successful for version 5. Total providers exported: ${providersArray.length()}")
             root.toString()
         } catch (t: Throwable) {
             Log.e(TAG, "Error during exportUserData", t)
@@ -193,6 +198,17 @@ class BackupRestoreManager(
             val obj = JSONObject(json)
             val providersArray = obj.optJSONArray("providers") ?: return false
             val backupVersion = obj.optInt("version", 1)
+
+            // Validate before writing anything. In particular, do not activate a profile whose
+            // provider data could not be restored on this installation.
+            val availableProviderNames = providers.map { it.name }.toSet()
+            val hasMissingProviders = (0 until providersArray.length()).any { index ->
+                providersArray.optJSONObject(index)?.optString("name") !in availableProviderNames
+            }
+            if (hasMissingProviders) {
+                Log.w(TAG, "Backup contains providers that are unavailable; import aborted")
+                return false
+            }
 
             Log.d(TAG, "Starting import from version $backupVersion for ${providersArray.length()} providers")
 
@@ -232,6 +248,8 @@ class BackupRestoreManager(
                         val isFavorite = s.optBoolean("isFavorite", false)
                         val favoritedAtMillis = s.optLongOrNull("favoritedAtMillis")
                         val isWatching = s.optBoolean("isWatching", false) // Corretto il default a false
+                        val lastPlayedAtMillis = s.optLongOrNull("lastPlayedAtMillis")
+                        val lastPlayedEpisodeId = s.optStringOrNull("lastPlayedEpisodeId")
 
                         val tvShow = TvShow(
                             id = s.optString("id", ""),
@@ -242,6 +260,8 @@ class BackupRestoreManager(
                             this.isFavorite = isFavorite
                             this.favoritedAtMillis = favoritedAtMillis
                             this.isWatching = isWatching
+                            this.lastPlayedAtMillis = lastPlayedAtMillis
+                            this.lastPlayedEpisodeId = lastPlayedEpisodeId
                         }
                         providerCtx.tvShowDao.save(tvShow)
                         Log.d(TAG, "IMPORT: [${providerName}] TV Show: ${tvShow.title}. Favorites: $isFavorite, Watching: $isWatching")
@@ -257,6 +277,7 @@ class BackupRestoreManager(
                         val isWatched = m.optBoolean("isWatched", false)
                         val watchedDate = m.optLongOrNull("watchedDate")?.toCalendar()
                         val watchHistory = m.optJSONObject("watchHistory")?.toWatchHistory()
+                        val lastPlayedAtMillis = m.optLongOrNull("lastPlayedAtMillis")
                         
                         val movie = Movie(
                             id = m.optString("id", ""),
@@ -269,6 +290,7 @@ class BackupRestoreManager(
                             this.isWatched = isWatched
                             this.watchedDate = watchedDate
                             this.watchHistory = watchHistory
+                            this.lastPlayedAtMillis = lastPlayedAtMillis
                         }
                         providerCtx.movieDao.save(movie)
                         Log.d(TAG, "IMPORT: [${providerName}] Movie: ${movie.title}. Favorites: $isFavorite, Watched: $isWatched, History: ${watchHistory != null}")
@@ -301,6 +323,9 @@ class BackupRestoreManager(
                 buildCacheForProvider(providerCtx)
             }
 
+            // Profiles are committed last so a failed provider import cannot change the active
+            // interface configuration. Old backups simply have no interfaceProfiles member.
+            obj.optJSONArray("interfaceProfiles")?.let { InterfaceProfileManager.restoreJson(it.toString()) }
             Log.d(TAG, "Import completed successfully")
             true
         } catch (t: Throwable) {

@@ -10,12 +10,15 @@ import org.conscrypt.Conscrypt
 import com.streamflixreborn.streamflix.database.AppDatabase
 import com.streamflixreborn.streamflix.providers.AniWorldProvider
 import com.streamflixreborn.streamflix.providers.SerienStreamProvider
+import com.streamflixreborn.streamflix.sync.CloudSyncManager
+import com.streamflixreborn.streamflix.sync.SupabaseProvider
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ArtworkRepairScheduler
 import com.streamflixreborn.streamflix.utils.CacheUtils
 import com.streamflixreborn.streamflix.utils.DnsResolver
 import com.streamflixreborn.streamflix.utils.IsrgRootTrustProvider
 import com.streamflixreborn.streamflix.utils.UserPreferences
+import com.streamflixreborn.streamflix.interfaceprofile.InterfaceProfileManager
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -75,6 +78,7 @@ class StreamFlixApp : Application() {
 
         // 2. Inizializzazione preferenze (con applicationContext)
         UserPreferences.setup(this)
+        InterfaceProfileManager.initialize(this)
         DnsResolver.setDnsUrl(UserPreferences.dohProviderUrl)
 
         val appContext = applicationContext
@@ -83,6 +87,8 @@ class StreamFlixApp : Application() {
 
         applicationScope.launch(Dispatchers.IO) {
             AppDatabase.setup(appContext)
+            SupabaseProvider.initialize(appContext)
+            runCatching { CloudSyncManager.initialize(appContext) }
             SerienStreamProvider.initialize(appContext)
             AniWorldProvider.initialize(appContext)
             ArtworkRepairScheduler.schedule(appContext, UserPreferences.currentProvider)

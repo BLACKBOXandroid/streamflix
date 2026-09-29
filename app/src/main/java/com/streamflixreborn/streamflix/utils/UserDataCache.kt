@@ -13,6 +13,7 @@ import com.streamflixreborn.streamflix.models.Season
 import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.models.WatchItem
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.sync.CloudSyncHooks
 import com.streamflixreborn.streamflix.ui.UserDataNotifier
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
@@ -162,7 +163,7 @@ object UserDataCache {
     // -------------------------
 
     fun removeMovieFromContinueWatching(context: Context, provider: Provider, id: String) {
-        val current = read(context, provider) ?: return
+        val current = read(context, provider) ?: UserData()
 
         runCatching {
             val db = AppDatabase.getInstance(context)
@@ -177,6 +178,7 @@ object UserDataCache {
         write(context, provider, current.copy(
             continueWatchingMovies = current.continueWatchingMovies.filter { it.id != id }
         ))
+        CloudSyncHooks.movie(context, provider, id)
         UserDataNotifier.notifyChanged()
     }
 
@@ -187,16 +189,18 @@ object UserDataCache {
             continueWatchingMovies = (current.continueWatchingMovies + movie.toCached())
                 .distinctBy { it.id }
         ))
+        CloudSyncHooks.movie(context, provider, movie)
         UserDataNotifier.notifyChanged()
     }
 
     fun removeMovieFromFavorites(context: Context, provider: Provider, id: String) {
-        val current = read(context, provider) ?: return
+        val current = read(context, provider) ?: UserData()
 
         write(context, provider, current.copy(
             favoritesMovies = current.favoritesMovies.filter { it.id != id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.movie(context, provider, id)
     }
 
     fun addMovieToFavorites(context: Context, provider: Provider, movie: Movie) {
@@ -211,6 +215,7 @@ object UserDataCache {
                 .distinctBy { it.id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.movie(context, provider, favoritedMovie)
     }
 
     // -------------------------
@@ -218,12 +223,13 @@ object UserDataCache {
     // -------------------------
 
     fun removeEpisodeFromContinueWatching(context: Context, provider: Provider, id: String) {
-        val current = read(context, provider) ?: return
+        val current = read(context, provider) ?: UserData()
 
         write(context, provider, current.copy(
             continueWatchingEpisodes = current.continueWatchingEpisodes.filter { it.id != id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.episode(context, provider, id)
     }
 
     fun addEpisodeToContinueWatching(context: Context, provider: Provider, episode: Episode) {
@@ -234,6 +240,7 @@ object UserDataCache {
                 .distinctBy { it.id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.episode(context, provider, episode)
     }
 
     // -------------------------
@@ -241,12 +248,13 @@ object UserDataCache {
     // -------------------------
 
     fun removeTvShowFromFavorites(context: Context, provider: Provider, id: String) {
-        val current = read(context, provider) ?: return
+        val current = read(context, provider) ?: UserData()
 
         write(context, provider, current.copy(
             favoritesTvShows = current.favoritesTvShows.filter { it.id != id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.tvShow(context, provider, id)
     }
 
     fun addTvShowToFavorites(context: Context, provider: Provider, tvShow: TvShow) {
@@ -261,6 +269,7 @@ object UserDataCache {
                 .distinctBy { it.id }
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.tvShow(context, provider, favoritedTvShow)
     }
 
     // -------------------------
@@ -293,6 +302,7 @@ object UserDataCache {
             favoritesMovies = updatedFavorites
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.movie(context, provider, movie)
     }
 
     fun syncEpisodeToCache(context: Context, provider: Provider, episode: Episode) {
@@ -309,6 +319,7 @@ object UserDataCache {
             continueWatchingEpisodes = updatedContinueWatching
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.episode(context, provider, episode)
     }
 
     fun syncTvShowToCache(context: Context, provider: Provider, tvShow: TvShow) {
@@ -329,6 +340,7 @@ object UserDataCache {
             favoritesTvShows = updatedFavorites
         ))
         UserDataNotifier.notifyChanged()
+        CloudSyncHooks.tvShow(context, provider, tvShow)
     }
 
 
@@ -337,6 +349,7 @@ object UserDataCache {
 
     data class CachedMovie(
         val id: String,
+        val providerName: String? = null,
         val title: String,
         val overview: String? = null,
         val released: String? = null,
@@ -356,6 +369,7 @@ object UserDataCache {
 
     data class CachedTvShow(
         val id: String,
+        val providerName: String? = null,
         val title: String,
         val overview: String? = null,
         val released: String? = null,
@@ -371,6 +385,7 @@ object UserDataCache {
 
     data class CachedEpisode(
         val id: String,
+        val providerName: String? = null,
         val number: Int,
         val title: String? = null,
         val released: String? = null,
@@ -393,6 +408,7 @@ object UserDataCache {
 
     fun CachedMovie.toMovie() = Movie(
         id = id,
+        providerName = providerName,
         title = title,
         overview = overview,
         released = released,
@@ -417,6 +433,7 @@ object UserDataCache {
 
     fun CachedTvShow.toTvShow() = TvShow(
         id = id,
+        providerName = providerName,
         title = title,
         overview = overview,
         released = released,
@@ -453,7 +470,7 @@ object UserDataCache {
                 title = this@toEpisode.tvShowTitle.orEmpty(),
                 poster = this@toEpisode.tvShowPoster,
                 banner = this@toEpisode.tvShowBanner,
-            )
+            ).apply { providerName = this@toEpisode.providerName }
         }
         season = this@toEpisode.seasonId?.let {
             Season(
@@ -466,6 +483,7 @@ object UserDataCache {
     }
     fun Movie.toCached() = UserDataCache.CachedMovie(
         id = id,
+        providerName = providerName,
         title = title,
         overview = overview,
         released = released?.format("yyyy-MM-dd"),
@@ -484,6 +502,7 @@ object UserDataCache {
     )
     fun TvShow.toCached() = UserDataCache.CachedTvShow(
         id = id,
+        providerName = providerName,
         title = title,
         overview = overview,
         released = released?.format("yyyy-MM-dd"),
@@ -498,6 +517,7 @@ object UserDataCache {
     )
     fun Episode.toCached() = UserDataCache.CachedEpisode(
         id = id,
+        providerName = tvShow?.providerName,
         number = number,
         title = title,
         released = released?.format("yyyy-MM-dd"),

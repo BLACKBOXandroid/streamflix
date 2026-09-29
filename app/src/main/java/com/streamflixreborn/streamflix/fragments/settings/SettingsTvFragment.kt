@@ -177,7 +177,6 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
             }
         )
 
-
         displaySettings()
     }
 
@@ -224,6 +223,9 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
         if (::backupRestoreManager.isInitialized) {
             displaySettings()
         }
+        if (currentScreenState.rootKey == null) {
+            InterfaceProfileSettings.install(this, preferenceScreen)
+        }
         applyScreenTitle()
         view?.post { listView?.requestFocus() }
     }
@@ -237,6 +239,9 @@ class SettingsTvFragment : LeanbackPreferenceFragmentCompat() {
     private fun displaySettings() {
         updateOverviewLabels()
         updateProviderVisibilityState()
+        SupabaseSettingsController.bind(this, lifecycleScope) { key ->
+            findPreference(key)
+        }
 
         findPreference<EditTextPreference>("provider_streamingcommunity_domain")?.apply {
             val currentValue = UserPreferences.streamingcommunityDomain

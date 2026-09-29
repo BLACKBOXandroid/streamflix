@@ -226,12 +226,18 @@ class SettingsMobileFragment : PreferenceFragmentCompat() {
         if (::backupRestoreManager.isInitialized) {
             displaySettings()
         }
+        if (currentScreenState.rootKey == null) {
+            InterfaceProfileSettings.install(this, preferenceScreen)
+        }
         applyScreenTitle()
     }
 
     private fun displaySettings() {
         updateOverviewLabels()
         updateProviderVisibilityState()
+        SupabaseSettingsController.bind(this, lifecycleScope) { key ->
+            findPreference(key)
+        }
 
         findPreference<EditTextPreference>("provider_streamingcommunity_domain")?.apply {
             val currentValue = UserPreferences.streamingcommunityDomain
