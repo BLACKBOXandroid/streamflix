@@ -72,12 +72,15 @@ import com.streamflixreborn.streamflix.models.TvShow
 import com.streamflixreborn.streamflix.models.Video
 import com.streamflixreborn.streamflix.models.WatchItem
 import com.streamflixreborn.streamflix.providers.SerienStreamProvider
+import com.streamflixreborn.streamflix.sync.CloudSyncHooks
 import com.streamflixreborn.streamflix.ui.PlayerTvView
+import com.streamflixreborn.streamflix.utils.SubtitleOffsetRenderersFactory
 import com.streamflixreborn.streamflix.utils.DnsResolver
 import com.streamflixreborn.streamflix.utils.NetworkClient
 import com.streamflixreborn.streamflix.utils.EpisodeManager
 import com.streamflixreborn.streamflix.utils.MediaServer
 import com.streamflixreborn.streamflix.utils.PlayerGestureHelper
+import com.streamflixreborn.streamflix.utils.ContentRatingOverlayPolicy
 import com.streamflixreborn.streamflix.utils.UserPreferences
 import com.streamflixreborn.streamflix.utils.UserDataCache
 import com.streamflixreborn.streamflix.utils.dp
@@ -159,6 +162,9 @@ class PlayerTvFragment : Fragment() {
     private var nextEpisodePrefetchTargetId: String? = null
     private var nextEpisodePrefetchJob: Job? = null
     private var nextEpisodeOverlayDismissed = false
+    private var contentRatingOverlayJob: Job? = null
+    private var observedContentRatingMediaKey: String? = null
+    private var displayedContentRatingMediaKey: String? = null
     private val chooserReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP_MR1) {
@@ -257,6 +263,7 @@ class PlayerTvFragment : Fragment() {
 
         initializePlayer(false)
         initializeVideo()
+        observeContentRating()
         binding.pvPlayer.onMediaPreviousClicked = ::handleMediaPrevious
         binding.pvPlayer.onMediaNextClicked = ::handleMediaNext
         gestureHelper = PlayerGestureHelper(
@@ -370,7 +377,10 @@ class PlayerTvFragment : Fragment() {
                         binding.settings.setOnServerSelectedListener { server ->
                             viewModel.getVideo(state.servers.find { server.id == it.id }!!)
                         }
-                        viewModel.getVideo(state.servers.first())
+                        val preferredServer = state.servers.firstOrNull {
+                            it.name.equals(args.preferredServerName, ignoreCase = true)
+                        }
+                        viewModel.getVideo(preferredServer ?: state.servers.first())
 
                     }
                         is PlayerViewModel.State.FailedLoadingServers -> {
@@ -573,6 +583,7 @@ class PlayerTvFragment : Fragment() {
                                 "subtitle",
                                 "S${nextEpisode.season.number} E${nextEpisode.number}  •  ${nextEpisode.title}"
                             )
+                            putString("preferredServerName", currentServer?.name)
                         }
 
                         hideNextEpisodeOverlay()
@@ -612,6 +623,7 @@ class PlayerTvFragment : Fragment() {
         override fun onDestroyView() {
             super.onDestroyView()
             nextEpisodePrefetchJob?.cancel()
+            contentRatingOverlayJob?.cancel()
             clearBypassSession(dismissDialog = true)
             releasePlayer()
             try {
@@ -620,6 +632,43 @@ class PlayerTvFragment : Fragment() {
             }
             _binding = null
             isSetupDone = false
+        }
+
+        private fun observeContentRating() {
+            viewLifecycleOwner.lifecycleScope.launch {
+                viewModel.contentRating.flowWithLifecycle(viewLifecycleOwner.lifecycle, Lifecycle.State.STARTED)
+                    .collect { state ->
+                        if (state is PlayerViewModel.RatingState.Available &&
+                            state.mediaKey == displayedContentRatingMediaKey
+                        ) return@collect
+                        if (state is PlayerViewModel.RatingState.Loading &&
+                            state.mediaKey != observedContentRatingMediaKey
+                        ) {
+                            observedContentRatingMediaKey = state.mediaKey
+                            displayedContentRatingMediaKey = null
+                        }
+                        contentRatingOverlayJob?.cancel()
+                        binding.tvContentRatingBadge.animate().cancel()
+                        when (state) {
+                            is PlayerViewModel.RatingState.Available -> {
+                                observedContentRatingMediaKey = state.mediaKey
+                                displayedContentRatingMediaKey = state.mediaKey
+                                val badge = binding.tvContentRatingBadge
+                                badge.text = state.rating.certification
+                                badge.alpha = 0f
+                                badge.visibility = View.VISIBLE
+                                badge.animate().alpha(1f).setDuration(180L).start()
+                                contentRatingOverlayJob = viewLifecycleOwner.lifecycleScope.launch {
+                                    delay(ContentRatingOverlayPolicy.DISPLAY_DURATION_MS - ContentRatingOverlayPolicy.FADE_OUT_DURATION_MS)
+                                    badge.animate().alpha(0f).setDuration(ContentRatingOverlayPolicy.FADE_OUT_DURATION_MS).withEndAction {
+                                        if (_binding != null) badge.visibility = View.GONE
+                                    }.start()
+                                }
+                            }
+                            else -> binding.tvContentRatingBadge.visibility = View.GONE
+                        }
+                    }
+            }
         }
 
     fun onBackPressed(): Boolean = when {
@@ -962,10 +1011,16 @@ class PlayerTvFragment : Fragment() {
                                         true
                                     }
 
-                                    database.tvShowDao().save(tvShow.copy().apply {
+                                    val updatedTvShow = tvShow.copy().apply {
                                         merge(tvShow)
                                         isWatching = isWatchingValue
-                                    })
+                                    }
+                                    database.tvShowDao().update(updatedTvShow)
+                                    CloudSyncHooks.tvShow(
+                                        requireContext(),
+                                        provider,
+                                        updatedTvShow,
+                                    )
                                 }
                             }
                         }
@@ -1204,6 +1259,7 @@ class PlayerTvFragment : Fragment() {
                     binding.pvPlayer.keepScreenOn = isPlaying
 
                     if (isPlaying) {
+                        recordRecentlyWatchedStart()
                         startProgressHandler()
                     } else {
                         stopProgressHandler()
@@ -1269,11 +1325,17 @@ class PlayerTvFragment : Fragment() {
                                         val isStillWatching =
                                             episodeDao.hasAnyWatchHistoryForTvShow(tvShow.id)
 
-                                        database.tvShowDao().save(tvShow.copy().apply {
+                                        val updatedTvShow = tvShow.copy().apply {
                                             merge(tvShow)
                                             isWatching =
                                                 !player.hasReallyFinished() || isStillWatching
-                                        })
+                                        }
+                                        database.tvShowDao().update(updatedTvShow)
+                                        CloudSyncHooks.tvShow(
+                                            requireContext(),
+                                            provider,
+                                            updatedTvShow,
+                                        )
                                     }
                                 }
                             }
@@ -1339,6 +1401,65 @@ class PlayerTvFragment : Fragment() {
 
         private fun ExoPlayer.hasStarted(): Boolean {
             return (this.currentPosition > (this.duration * 0.005) || this.currentPosition > 20.seconds.inWholeMilliseconds)
+        }
+
+        private fun recordRecentlyWatchedStart() {
+            val playedAtMillis = System.currentTimeMillis()
+            when (val videoType = currentVideoTypeForUi()) {
+                is Video.Type.Movie -> {
+                    if (database.movieDao().markRecentlyWatched(videoType.id, playedAtMillis) == 0) {
+                        database.movieDao().insert(
+                            Movie(
+                                id = videoType.id,
+                                title = videoType.title,
+                                released = videoType.releaseDate,
+                                poster = videoType.poster,
+                                imdbId = videoType.imdbId,
+                            ).apply {
+                                lastPlayedAtMillis = playedAtMillis
+                            }
+                        )
+                    }
+                }
+
+                is Video.Type.Episode -> {
+                    val storedTvShow = database.tvShowDao().getById(videoType.tvShow.id)
+                        ?: TvShow(
+                            id = videoType.tvShow.id,
+                            title = videoType.tvShow.title,
+                            released = videoType.tvShow.releaseDate,
+                            poster = videoType.tvShow.poster,
+                            banner = videoType.tvShow.banner,
+                            imdbId = videoType.tvShow.imdbId,
+                        ).apply {
+                            lastPlayedAtMillis = playedAtMillis
+                            lastPlayedEpisodeId = videoType.id
+                            database.tvShowDao().insert(this)
+                        }
+
+                    if (database.episodeDao().getById(videoType.id) == null) {
+                        database.episodeDao().insert(
+                            Episode(
+                                id = videoType.id,
+                                number = videoType.number,
+                                title = videoType.title,
+                                poster = videoType.poster,
+                                overview = videoType.overview,
+                                tvShow = storedTvShow,
+                                season = Season(
+                                    number = videoType.season.number,
+                                    title = videoType.season.title.orEmpty(),
+                                ),
+                            )
+                        )
+                    }
+                    database.tvShowDao().markRecentlyWatched(
+                        id = videoType.tvShow.id,
+                        episodeId = videoType.id,
+                        playedAtMillis = playedAtMillis,
+                    )
+                }
+            }
         }
 
         private fun ExoPlayer.hasFinished(): Boolean {
@@ -1623,17 +1744,15 @@ class PlayerTvFragment : Fragment() {
                 )
                 .build()
 
-            val baseBuilder = if (Build.VERSION.SDK_INT <= Build.VERSION_CODES.N_MR1 && !currentSoftwareDecoder) {
-                ExoPlayer.Builder(requireContext())
-            } else {
-                val renderersFactory = DefaultRenderersFactory(requireContext()).apply {
+            val renderersFactory = SubtitleOffsetRenderersFactory(requireContext()).apply {
+                if (Build.VERSION.SDK_INT > Build.VERSION_CODES.N_MR1 || currentSoftwareDecoder) {
                     setEnableDecoderFallback(true)
                     if (currentSoftwareDecoder) {
                         setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
                     }
                 }
-                ExoPlayer.Builder(requireContext(), renderersFactory)
             }
+            val baseBuilder = ExoPlayer.Builder(requireContext(), renderersFactory)
 
             return baseBuilder
                 .setMediaSourceFactory(DefaultMediaSourceFactory(dataSourceFactory))

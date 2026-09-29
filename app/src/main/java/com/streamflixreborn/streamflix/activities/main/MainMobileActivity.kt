@@ -31,8 +31,10 @@ import com.streamflixreborn.streamflix.databinding.ActivityMainMobileBinding
 import com.streamflixreborn.streamflix.fragments.player.PlayerMobileFragment
 import com.streamflixreborn.streamflix.providers.Cine24hProvider
 import com.streamflixreborn.streamflix.providers.FilmyOnlineCcProvider
+import com.streamflixreborn.streamflix.providers.GuardaSerieProvider
 import com.streamflixreborn.streamflix.providers.IptvProvider
 import com.streamflixreborn.streamflix.providers.Provider
+import com.streamflixreborn.streamflix.providers.ZaluknijProvider
 import com.streamflixreborn.streamflix.ui.UpdateAppMobileDialog
 import com.streamflixreborn.streamflix.utils.AppLanguageManager
 import com.streamflixreborn.streamflix.utils.ProviderChangeNotifier
@@ -105,6 +107,8 @@ class MainMobileActivity : FragmentActivity() {
         AnimeOnlineNinjaProvider.init(this)
         Cine24hProvider.init(this)
         FilmyOnlineCcProvider.init(this)
+        GuardaSerieProvider.init(this)
+        ZaluknijProvider.init(this)
 
         WindowCompat.setDecorFitsSystemWindows(window, false)
         val palette = ThemeManager.palette(UserPreferences.selectedTheme)
@@ -164,6 +168,11 @@ class MainMobileActivity : FragmentActivity() {
         viewModel.checkUpdate()
 
         binding.bnvMain.setupWithNavController(navController)
+        binding.btnMainSearch.setOnClickListener {
+            if (navController.currentDestination?.id != R.id.search) {
+                navController.navigate(R.id.search)
+            }
+        }
         updateNavigationVisibility()
         updateBottomNavigationVisibility(navController.currentDestination?.id)
 
@@ -283,6 +292,11 @@ class MainMobileActivity : FragmentActivity() {
         val showBottomNav =
             UserPreferences.currentProvider != null && isTopLevelProviderDestination(destinationId)
         binding.bnvMain.visibility = if (showBottomNav) View.VISIBLE else View.GONE
+        binding.btnMainSearch.visibility = if (
+            UserPreferences.currentProvider != null &&
+            isTopLevelProviderDestination(destinationId) &&
+            destinationId != R.id.search
+        ) View.VISIBLE else View.GONE
     }
 
     private fun updateNavigationVisibility(currentDestinationId: Int? = null) {
@@ -320,6 +334,7 @@ class MainMobileActivity : FragmentActivity() {
             R.id.home,
             R.id.movies,
             R.id.tv_shows,
+            R.id.favorites,
             R.id.settings,
         )
     }

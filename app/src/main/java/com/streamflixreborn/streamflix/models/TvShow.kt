@@ -45,8 +45,16 @@ class TvShow(
     override var isFavorite: Boolean = false,
 ) : Show, AppAdapter.Item {
 
+    @Ignore
+    var contentRating: ContentRating? = null
+
     var released = released?.toCalendar()
     var favoritedAtMillis: Long? = null
+    var lastPlayedAtMillis: Long? = null
+    var lastPlayedEpisodeId: String? = null
+
+    @Ignore
+    var lastPlayedEpisode: Episode? = null
 
     var isWatching: Boolean = true
 
@@ -82,6 +90,8 @@ class TvShow(
         if (isFavorite != tvShow.isFavorite) return false
         if (favoritedAtMillis != tvShow.favoritedAtMillis) return false
         if (isWatching != tvShow.isWatching) return false
+        if (lastPlayedAtMillis != tvShow.lastPlayedAtMillis) return false
+        if (lastPlayedEpisodeId != tvShow.lastPlayedEpisodeId) return false
         return true
     }
 
@@ -89,6 +99,9 @@ class TvShow(
         this.isFavorite = tvShow.isFavorite
         this.favoritedAtMillis = tvShow.favoritedAtMillis
         this.isWatching = tvShow.isWatching
+        this.lastPlayedAtMillis = tvShow.lastPlayedAtMillis
+        this.lastPlayedEpisodeId = tvShow.lastPlayedEpisodeId
+        this.lastPlayedEpisode = tvShow.lastPlayedEpisode
         return this
     }
 
@@ -134,7 +147,12 @@ class TvShow(
         cast,
         recommendations,
         isFavorite,
-    )
+    ).apply {
+        lastPlayedAtMillis = this@TvShow.lastPlayedAtMillis
+        lastPlayedEpisodeId = this@TvShow.lastPlayedEpisodeId
+        lastPlayedEpisode = this@TvShow.lastPlayedEpisode
+        contentRating = this@TvShow.contentRating
+    }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -161,6 +179,8 @@ class TvShow(
         if (isFavorite != other.isFavorite) return false
         if (favoritedAtMillis != other.favoritedAtMillis) return false
         if (isWatching != other.isWatching) return false
+        if (lastPlayedAtMillis != other.lastPlayedAtMillis) return false
+        if (lastPlayedEpisodeId != other.lastPlayedEpisodeId) return false
         if (isFavorite != other.isFavorite) return false
         if (!::itemType.isInitialized || !other::itemType.isInitialized) return false
         return itemType == other.itemType
@@ -186,6 +206,8 @@ class TvShow(
         result = 31 * result + isFavorite.hashCode()
         result = 31 * result + (favoritedAtMillis?.hashCode() ?: 0)
         result = 31 * result + isWatching.hashCode()
+        result = 31 * result + (lastPlayedAtMillis?.hashCode() ?: 0)
+        result = 31 * result + (lastPlayedEpisodeId?.hashCode() ?: 0)
         result = 31 * result + (if (::itemType.isInitialized) itemType.hashCode() else 0)
         return result
     }

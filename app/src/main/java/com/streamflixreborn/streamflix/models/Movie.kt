@@ -40,8 +40,12 @@ class Movie(
     override var isFavorite: Boolean = false,
 ) : Show, WatchItem, AppAdapter.Item {
 
+    @Ignore
+    var contentRating: ContentRating? = null
+
     var released = released?.toCalendar()
     var favoritedAtMillis: Long? = null
+    var lastPlayedAtMillis: Long? = null
 
     override var isWatched: Boolean = false
     override var watchedDate: Calendar? = null
@@ -56,6 +60,7 @@ class Movie(
         if (isWatched != movie.isWatched) return false
         if (watchedDate != movie.watchedDate) return false
         if (watchHistory != movie.watchHistory) return false
+        if (lastPlayedAtMillis != movie.lastPlayedAtMillis) return false
         return true
     }
 
@@ -65,6 +70,7 @@ class Movie(
         this.isWatched = movie.isWatched
         this.watchedDate = movie.watchedDate
         this.watchHistory = movie.watchHistory
+        this.lastPlayedAtMillis = movie.lastPlayedAtMillis
         return this
     }
 
@@ -108,7 +114,10 @@ class Movie(
         cast,
         recommendations,
         isFavorite,
-    )
+    ).apply {
+        lastPlayedAtMillis = this@Movie.lastPlayedAtMillis
+        contentRating = this@Movie.contentRating
+    }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -137,6 +146,7 @@ class Movie(
         if (isWatched != other.isWatched) return false
         if (watchedDate != other.watchedDate) return false
         if (watchHistory != other.watchHistory) return false
+        if (lastPlayedAtMillis != other.lastPlayedAtMillis) return false
         if (!::itemType.isInitialized || !other::itemType.isInitialized) return false
         return itemType == other.itemType
     }
@@ -162,6 +172,7 @@ class Movie(
         result = 31 * result + isWatched.hashCode()
         result = 31 * result + (watchedDate?.hashCode() ?: 0)
         result = 31 * result + (watchHistory?.hashCode() ?: 0)
+        result = 31 * result + (lastPlayedAtMillis?.hashCode() ?: 0)
         result = 31 * result + (if (::itemType.isInitialized) itemType.hashCode() else 0)
         return result
     }
