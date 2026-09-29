@@ -43,10 +43,17 @@ class TvShow(
     @Ignore
     val recommendations: List<Show> = listOf(),
     override var isFavorite: Boolean = false,
+    @Ignore
+    var contentRating: ContentRating? = null,
 ) : Show, AppAdapter.Item {
 
     var released = released?.toCalendar()
     var favoritedAtMillis: Long? = null
+    var lastPlayedAtMillis: Long? = null
+    var lastPlayedEpisodeId: String? = null
+
+    @Ignore
+    var lastPlayedEpisode: Episode? = null
 
     var isWatching: Boolean = true
 
@@ -82,6 +89,8 @@ class TvShow(
         if (isFavorite != tvShow.isFavorite) return false
         if (favoritedAtMillis != tvShow.favoritedAtMillis) return false
         if (isWatching != tvShow.isWatching) return false
+        if (lastPlayedAtMillis != tvShow.lastPlayedAtMillis) return false
+        if (lastPlayedEpisodeId != tvShow.lastPlayedEpisodeId) return false
         return true
     }
 
@@ -89,6 +98,9 @@ class TvShow(
         this.isFavorite = tvShow.isFavorite
         this.favoritedAtMillis = tvShow.favoritedAtMillis
         this.isWatching = tvShow.isWatching
+        this.lastPlayedAtMillis = tvShow.lastPlayedAtMillis
+        this.lastPlayedEpisodeId = tvShow.lastPlayedEpisodeId
+        this.lastPlayedEpisode = tvShow.lastPlayedEpisode
         return this
     }
 
@@ -109,6 +121,7 @@ class TvShow(
         poster: String? = this.poster,
         banner: String? = this.banner,
         imdbId: String? = this.imdbId,
+        contentRating: ContentRating? = this.contentRating,
         seasons: List<Season> = this.seasons,
         genres: List<Genre> = this.genres,
         directors: List<People> = this.directors,
@@ -134,7 +147,12 @@ class TvShow(
         cast,
         recommendations,
         isFavorite,
-    )
+        contentRating,
+    ).apply {
+        lastPlayedAtMillis = this@TvShow.lastPlayedAtMillis
+        lastPlayedEpisodeId = this@TvShow.lastPlayedEpisodeId
+        lastPlayedEpisode = this@TvShow.lastPlayedEpisode
+    }
 
     override fun equals(other: Any?): Boolean {
         if (this === other) return true
@@ -152,6 +170,7 @@ class TvShow(
         if (poster != other.poster) return false
         if (banner != other.banner) return false
         if (imdbId != other.imdbId) return false
+        if (contentRating != other.contentRating) return false
         if (seasons != other.seasons) return false
         if (genres != other.genres) return false
         if (directors != other.directors) return false
@@ -161,6 +180,8 @@ class TvShow(
         if (isFavorite != other.isFavorite) return false
         if (favoritedAtMillis != other.favoritedAtMillis) return false
         if (isWatching != other.isWatching) return false
+        if (lastPlayedAtMillis != other.lastPlayedAtMillis) return false
+        if (lastPlayedEpisodeId != other.lastPlayedEpisodeId) return false
         if (isFavorite != other.isFavorite) return false
         if (!::itemType.isInitialized || !other::itemType.isInitialized) return false
         return itemType == other.itemType
@@ -177,6 +198,7 @@ class TvShow(
         result = 31 * result + (poster?.hashCode() ?: 0)
         result = 31 * result + (banner?.hashCode() ?: 0)
         result = 31 * result + (imdbId?.hashCode() ?: 0)
+        result = 31 * result + (contentRating?.hashCode() ?: 0)
         result = 31 * result + seasons.hashCode()
         result = 31 * result + genres.hashCode()
         result = 31 * result + directors.hashCode()
@@ -186,6 +208,8 @@ class TvShow(
         result = 31 * result + isFavorite.hashCode()
         result = 31 * result + (favoritedAtMillis?.hashCode() ?: 0)
         result = 31 * result + isWatching.hashCode()
+        result = 31 * result + (lastPlayedAtMillis?.hashCode() ?: 0)
+        result = 31 * result + (lastPlayedEpisodeId?.hashCode() ?: 0)
         result = 31 * result + (if (::itemType.isInitialized) itemType.hashCode() else 0)
         return result
     }
