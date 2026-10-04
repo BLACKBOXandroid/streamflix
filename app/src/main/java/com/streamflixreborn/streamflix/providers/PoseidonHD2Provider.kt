@@ -584,8 +584,7 @@ object PoseidonHD2Provider : Provider {
         } catch (e: Exception) {
             Log.w(TAG, "OkHttp resolution failed for $playerUrl")
         }
-        
-        return null
+        return playerUrl
     }
 
     override suspend fun getVideo(server: Video.Server): Video {

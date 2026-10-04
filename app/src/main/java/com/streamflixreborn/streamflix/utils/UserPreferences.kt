@@ -38,7 +38,7 @@ object UserPreferences {
     private const val DEFAULT_SERIENSTREAM_DOMAIN = "s.to"
     private const val DEFAULT_MOFLIX_DOMAIN = "moflix-stream.xyz"
     private const val DEFAULT_STREAMINGCOMMUNITY_DOMAIN = "streamingunity.cc"
-    private const val DEFAULT_CUEVANA_DOMAIN = "cuevana.gs"
+    private const val DEFAULT_CUEVANA_DOMAIN = "wv3.cuevana3.eu"
     private const val DEFAULT_POSEIDON_DOMAIN = "www.poseidonhd2.co"
 
     const val PROVIDER_URL = "URL"

@@ -124,10 +124,10 @@ abstract class Extractor {
         suspend fun extract(link: String, server: Video.Server? = null): Video {
             var finalLink = link
             
-            // 1. RISOLUZIONE BRIDGE UNIVERSALE (StreamHG/Sync/Cuevana)
-            // Facciamo questo PRIMA di cercare l'estrattore perché il link bridge (es. mysync.mov)
-            // non appartiene a nessun estrattore specifico, ma il link risolto sì (es. filemoon).
-            if (link.contains("mysync.mov/stream/")) {
+            // 1. RISOLUZIONE BRIDGE UNIVERSALE (StreamHG/Sync/Cuevana player.php)
+            // Facciamo questo PRIMA di cercare l'estrattore perché il link bridge (es. mysync.mov, player.cuevana3.eu)
+            // non appartiene a nessun estrattore specifico, ma il link risolto sì (es. streamwish, vidhide, voe).
+            if (link.contains("mysync.mov/stream/") || link.contains("player.cuevana3.eu/") || link.contains("player.cuevana.biz/")) {
                 try {
                     val client = okhttp3.OkHttpClient.Builder()
                         .followRedirects(true)
@@ -138,13 +138,17 @@ abstract class Extractor {
                         val request = okhttp3.Request.Builder()
                             .url(link)
                             .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                            .header("Referer", "https://wv3.cuevana3.eu/")
                             .build()
                         client.newCall(request).execute().use { it.body?.string() }
                     } ?: ""
                     
-                    val redirectUrl = responseBody.substringAfter("window.location.replace(\"", "").substringBefore("\"")
-                        .ifEmpty { responseBody.substringAfter("window.location.href = \"", "").substringBefore("\"") }
-                        .ifEmpty { responseBody.substringAfter("src=\"", "").substringBefore("\"") }
+                    val redirectUrl = Regex("""(?:var\s+url\s*=\s*['"]|window\.location\.href\s*=\s*['"]|window\.location\.replace\(["'])(https?://[^'"]+)["']""")
+                        .find(responseBody)?.groupValues?.getOrNull(1)
+                        ?: Regex("""<iframe[^>]+src=["'](https?://[^'"]+)["']""").find(responseBody)?.groupValues?.getOrNull(1)
+                        ?: responseBody.substringAfter("window.location.replace(\"", "").substringBefore("\"")
+                            .ifEmpty { responseBody.substringAfter("window.location.href = \"", "").substringBefore("\"") }
+                            .ifEmpty { responseBody.substringAfter("src=\"", "").substringBefore("\"") }
                     
                     if (redirectUrl.isNotEmpty() && redirectUrl.startsWith("http")) {
                         Log.d("Extractor", "Universal Bridge resolved: $link -> $redirectUrl")

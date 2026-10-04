@@ -16,7 +16,10 @@ class VidHideExtractor: Extractor() {
     override val mainUrl = "https://dhtpre.com"
 
     override val aliasUrls = listOf(
+        "https://vimeos.net",
         "https://peytonepre.com",
+        "https://vidhidepro.com",
+        "https://vidhidepre.com",
         "https://vidhideplus.com/",
         "https://mivalyo",
         "https://dinisglows",
@@ -64,7 +67,10 @@ class VidHideExtractor: Extractor() {
                 links[it.groupValues[1]] = it.groupValues[2]
             }
 
-        val finalUrl = links["hls4"] ?: links["hls2"] ?: throw Exception("No HLS link found")
+        val directM3u8 = Regex("""https?://[^"'\s,;]+\.m3u8[^"'\s,;]*""").find(unPacked)?.value
+            ?: Regex("""(?:file|source|src)\s*:\s*["']([^"']+\.m3u8[^"']*)["']""").find(unPacked)?.groupValues?.getOrNull(1)
+
+        val finalUrl = links["hls4"] ?: links["hls2"] ?: directM3u8 ?: throw Exception("No HLS link found")
         
         // Add domain if the URL starts with "/"
         val completeUrl = if (finalUrl.startsWith("/")) {

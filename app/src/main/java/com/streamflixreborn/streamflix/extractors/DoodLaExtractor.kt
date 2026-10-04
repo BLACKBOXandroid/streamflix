@@ -17,6 +17,11 @@ open class DoodLaExtractor : Extractor() {
     override val name = "DoodStream"
     override val mainUrl = "https://dood.la"
     override val aliasUrls = listOf(
+        "https://doodstream.com",
+        "https://dood.so",
+        "https://dood.ws",
+        "https://dood.sh",
+        "https://dood.pm",
         "https://dsvplay.com",
         "https://mikaylaarealike.com",
         "https://myvidplay.com",
